@@ -1007,8 +1007,6 @@ std::pair<std::string, int> lexerIterator::operator*()
 }
 
 
-
-
 	
 lexer::iterator lexer::getIterator(const std::string* strPtrToMatch) const
 {
