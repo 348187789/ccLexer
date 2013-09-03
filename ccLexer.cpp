@@ -22,32 +22,6 @@
 #include "ccLexer.h"
 
 
-		/////////////////////////////////////////////////////////////////debug
-double timeOfSomeOperation;
-
-struct countTime
-{
-	boost::timer t;
-	bool counted;
-	
-	countTime() : counted(false){}
-
-	void count(){counted = true; timeOfSomeOperation += t.elapsed();}
-
-	~countTime()
-	{
-		if(!counted)
-		{
-			timeOfSomeOperation += t.elapsed();
-		}
-	}
-};
-
-
-/******************************************************************/
-/*                         class pool                             */
-/******************************************************************/
-
 namespace cc
 {
 
@@ -138,13 +112,11 @@ template<class T, unsigned int N = 20>
 class pool
 {
 public:
-
     pool(){}
-
     pool(pool&& other)
     {
         last = std::move(other.last);
-        first = std::move(other.first);// 注意这里顺序不能变，否则会把前n-1个块全都析构掉
+        first = std::move(other.first); //
     }
 
     ~pool(){}
@@ -152,7 +124,7 @@ public:
     void operator=(pool&& other)
     {
         last = std::move(other.last);
-        first = std::move(other.first);// 注意这里顺序不能变，否则会把前n-1个块全都析构掉
+        first = std::move(other.first);
     }
 
     T* get()
@@ -168,7 +140,6 @@ public:
             first.reset(new simplePool<T, N>);
             first->next = tmp;
         }
-
         return first->getItemPtr();
     }
 
@@ -241,6 +212,7 @@ void getIsRegexSpecialCharArry(const char*& ret)
     specialCharArry[static_cast<unsigned int>('/')] = 1;
     ret = specialCharArry;
 }
+
 
 std::once_flag getIsRegexSpecialCharArryFlag;
 static const char* isSpecialCharArry = nullptr;
@@ -318,7 +290,7 @@ private:
         rangeEnd   = cEnd;
     }
     char rangeBegin;
-    char rangeEnd; // end in range = true
+    char rangeEnd; // range(a, b) contains char 'b'
 
 }; // class charRange
 
@@ -336,11 +308,8 @@ class numRange // TODO with "x{0-9}""
 
 struct nfaState
 {
-//  数据成员
     std::vector<nfaState*> nextStates;
     std::vector<nfaState*> epsiStates;
-//  成员函数
-    // 默认构造函数
 
     void swap(nfaState& other)
     {
@@ -357,7 +326,7 @@ struct nfaState
     {
         regex_assert(cRange.begin() != 127,"wrong char range, cannot use char(127)\n");
         assert(next);
-        if(nextStates.empty()) // 性能不一定变好
+        if(nextStates.empty())
         {
             nextStates.resize(127, nullptr);
         }
@@ -419,7 +388,6 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
         assert(lhs && rhs);
         nfa newNfa(get(), get());
         newNfa.pBegin->linkToState(lhs.pBegin);
-        //newNfa.pEnd->linkToState(rhs.pBegin); // bug fix
         newNfa.pBegin->linkToState(rhs.pBegin);
         lhs.pEnd->linkToState(newNfa.pEnd);
         rhs.pEnd->linkToState(newNfa.pEnd);
@@ -454,7 +422,6 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
         nfa newNfa(get(), get());
         newNfa.pBegin->linkToState(inputNfa.pBegin);
         inputNfa.pEnd->linkToState(newNfa.pEnd);
-        // 比上面的少一句 link input.begin to input.end
         inputNfa.pEnd->linkToState(inputNfa.pBegin);
         return newNfa;
     };
@@ -474,17 +441,18 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
 
     auto readCharRange = [&]
     () -> charRange 
-    {    //   id = ([a-zA-Z]|_) [1-9a-zA-Z]*
-        // 暂时只支持 [a-zA-Z]形式
+    {
         if(isSpecialChar(*strIter))
+		{
             return charRange('\0'); // 返回时会被检测 *strIter == ']'
+		}
         char first = *strIter++;
         regex_assert(*strIter == '-', "valid char range");
         ++strIter;
         regex_assert(*strIter != char(0)  , "valid char range");
         char end = *strIter;
         ++strIter;
-        // 调用函数检查 *strIter
+        // 返回时 strIter
         return charRange(first, end);
 
     }; // regex::readCharRange()
@@ -522,14 +490,14 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
             }
             else if(equal(*strIter, '|'))
             {
-                // | 优先级最低（貌似是这样的）， 所以作用于前面所有的sd上
+                // | 优先级最低， 作用于前面所有的nfaState
                 // 而不是像*+仅仅作用在前一个字符上
                 storePre();
                 ++strIter;
                 nfa orNfa = readNfa();
                 // 注意此处调用了readNfa, 
                 // strIter已经指向了下一个要读的字符
-                // 在readNfa内调用自身(readNfa，一般指在for循环内)
+                // 在readNfa内调用自身(readNfa，一般只在for循环内)
                 // 几乎每次都要--strIter来抵消for里的++strIter
                 // 使此字符能被正确处理
                 --strIter;
@@ -599,7 +567,8 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
             else if(equal(*strIter, '{'))
             {
                 regex_assert(false, "operator {} not supported");
-                //numRange nr = readNumRange(); // unfinished
+				// TODO : x{1-9}
+                //numRange nr = readNumRange();
                 //regex_assert(equal(*strIter, '}'), "unmatched }\n");
                 //thisNfa = repeat(thisNfa, nr);
                 regex_assert(strIter!= strEnd && equal(*strIter, '}'), "unmatched '{'\n");
@@ -631,9 +600,9 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
         return preNfa;
     }; // regex::readNfa()
 
-
-    nfa result = readNfa();
+	nfa result;
     try{
+		result = readNfa();
         regex_assert(strIter == strEnd, 
             "unexcept terminator char");
     }
@@ -650,11 +619,9 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
 
 
 
-//typedef std::unordered_set<nfaState*> closure;
-// 这里使用unordered_set会assertin fail
 
 typedef std::set<nfaState*> closure;
-//typedef std::set<std::pair<int, nfaState*> > closure;
+// 这里使用unordered_set会assertin fail, 暂时还没查清原因
 
 closure getClosure(nfaState* inputNfaState)
 {
@@ -663,7 +630,7 @@ closure getClosure(nfaState* inputNfaState)
     assert(inputNfaState);
     if(nullptr == inputNfaState)
     {
-        return result; //注意空闭包处理 TODO
+        return result; 
     }
 
     auto insertToResult = [&]
@@ -708,10 +675,9 @@ closure getClosure(nfaState* inputNfaState)
 
 
 // 每次查询的闭包和最后dfa使用到的闭包不是同一个集合，
-// 所有查询过的单节点对应的闭包存放如 closureChache里面， 由closureCacheMap查询
-//  closureCache type : std::set<closure>
-//  closureCacheMap type : std::map<nfaState*, closure*>
-//  getClosureCache type : function<const closure&(nfaState)>
+// 所有查询过的单节点对应的闭包存放如 closureChache里面
+//  closureCache type : std::unordered_map<nfaState*, closure>
+//  getClosureCache type : function<const closure&(nfaState*)>
 
 // 用于形成 dfa 的闭包存放在 sMove 中
 // sMoveType : std::map< closure, std::pair<dfaState, int> >
@@ -720,12 +686,12 @@ closure getClosure(nfaState* inputNfaState)
 class hashOfClosure
 {
 public:
-std::size_t operator()(const closure& inputClosure) const 
+	std::size_t operator()(const closure& inputClosure) const 
 	{
 		size_t hashValue = 0;
 		for(nfaState* pState : inputClosure)
 		{
-			hashValue =    unsigned int(pState)+ unsigned int(pState) & 31 * 33 ;
+			hashValue += unsigned int(pState) + unsigned int(pState) & 31 * 33 ;
 		}
 		return hashValue;
 	};
@@ -738,20 +704,14 @@ std::vector<dfaState> getDfa(const std::vector<nfa>& inputNfaVec)
 {
     // inputVec 中的列出了优先级从高到低的regex对应的nfa，大小为1时可直接用于regex_match
     // 暂时使用这种方案，对dfa状态的数量可能有所影响， to改进
-
     
     assert(inputNfaVec.size() > 0);
-    
 
     /**************************************************/
     /*             lamda函数                            */
     /**************************************************/
-    //std::set<closure> closureCache;
-    //std::unordered_set<closure, hashOfClosure> closureCache;
-    //std::map<nfaState*, const closure*> closureCacheMap;
 	std::unordered_map<nfaState*, closure> closureCache;
     typedef decltype(closureCache) closureCacheType;
-    //typedef decltype(closureCacheMap) cacheMapType;
 
     auto getClosureInCache = [closureCache] // 这里使用mutable让cache成为function成员，不被外部改变
     (nfaState* inputNfaState) mutable -> const closure&
@@ -781,16 +741,13 @@ std::vector<dfaState> getDfa(const std::vector<nfa>& inputNfaVec)
         return ++idForLambda;
     };
     
-    // 核心数据
 
-	
+    // 核心数据
 
     std::unordered_map<closure, std::pair<dfaState, int>, hashOfClosure> sMove;
 	sMove.max_load_factor(2);//由1->2，大数据量下总时间 2.3->2.0
-	// std::map<closure, std::pair<dfaState, int> sMove;
     typedef decltype(sMove) sMoveType;
     typedef std::pair<dfaState, int> sMoveContentType;
-
 
 
 	// getTerminalId 使用新算法 在该函数性能提高40% 总时间降低8%
@@ -858,17 +815,17 @@ std::vector<dfaState> getDfa(const std::vector<nfa>& inputNfaVec)
         int& fromId = fromContent.second;
         // fromId = getId(); // 这里获得ID是错误的，要在给from.dfaState.next[c]赋值前对id赋值
 		closure toClosure;
-		// 将closure挪出循环体外，每次循环结束时clear,将运行时间从2.559->2.405
+		// toClosure被挪出循环体外提升性能还比较明显
         for(unsigned int c = 0; c <= 126; ++c) // 127是char最大值  是不可打印的char
         {
-			// 循环内不能出现 break和continue, 如果需要增加，反注释下面一行并删除scope最后一行的toClosure.clear();
+			//！！！ 循环内不能出现 break和continue, 如果需要增加，反注释下面一行并删除scope最后一行的toClosure.clear();
 			//cc::onScopeEnd clearToClosure([&toClosure]{toClosure.clear();});
             for(nfaState* pState : fromClosure)
             {
                 if(!pState->nextStates.empty())
                 {
                     nfaState* next = pState->nextStates[c];
-                    // 当 nfaState到终止节点时， next.nextStates 是空的，这里要注意这种情况
+                    // next可能为空
                     if(next)
                     {
                         const closure& clos = getClosureInCache(pState->nextStates[c]);
@@ -878,9 +835,8 @@ std::vector<dfaState> getDfa(const std::vector<nfa>& inputNfaVec)
                     }
                 }
             }
+
             // 现在 toClosure 就是 s_move(fromClosure, c）的结果了if(toClosure.size())
-
-
             if(toClosure.empty())
 			{
                 //指向 null, 虽然构造函数中已经初始化为nextDfaIsNullFlag了，但这么做对性能影响几乎没有
@@ -891,13 +847,12 @@ std::vector<dfaState> getDfa(const std::vector<nfa>& inputNfaVec)
 		// times 6700
 
 				auto toClosureIter = sMove.find(toClosure); /////////////28% time
-				// find(..) != sMove.end() 比sMove.count(..)还要快很多
 				if(toClosureIter == sMove.end())
-                // 把结果闭包注册到sMove中 
                 {
+					// 将结果写入sMove
 
                     auto insertResult = sMove.insert(sMoveType::value_type(toClosure, sMoveContentType()));//// 7% time
-                    //同时设置id, id必须这里设置， 因为下面就要对fromDfaState.next[c]赋值了
+                    // id必须这里设置， 因为下面就要对fromDfaState.next[c]赋值了
 					toClosureIter = insertResult.first;
                     std::pair<dfaState, int>& content = (*toClosureIter).second;
                     content.second = getId();
@@ -942,22 +897,20 @@ std::vector<dfaState> getDfa(const nfa inputNfa)
 
 
 
-typedef std::pair<std::string::const_iterator, std::string::const_iterator> rangeOfConstStrType;
+typedef std::pair<std::string::const_iterator, std::string::const_iterator> constStrRangeType;
 
-struct resultOfTokenizerMatchType
+struct matchedContentType
 {
-    rangeOfConstStrType strRange;
-    int terminalId;
+	constStrRangeType matchedStrRange;
+	int terminalId;
 };
 
-resultOfTokenizerMatchType tokenizerMatch(const std::vector<dfaState>& inputDfa, rangeOfConstStrType src)
+matchedContentType tokenizerMatch(const std::vector<dfaState>& inputDfa, constStrRangeType src)
 {
-    typedef resultOfTokenizerMatchType result_type;
-
-    result_type result;
-    result.strRange.first  = src.first;
-    result.strRange.second = src.first;
-    result.terminalId      = nonterminalFlagOfDfaState;
+    matchedContentType result;
+    result.matchedStrRange.first  = src.first; // stringRange.first = src.first
+    result.matchedStrRange.second = src.first; // stringRange.second = src.first
+    result.terminalId  = nonterminalFlagOfDfaState;
     if(src.first >= src.second)
     {
         return result;
@@ -986,7 +939,7 @@ resultOfTokenizerMatchType tokenizerMatch(const std::vector<dfaState>& inputDfa,
         {
             if(getTerminalId(lastDfaIndex) != nonterminalFlagOfDfaState)
             {
-                result.strRange.second = strIter;
+                result.matchedStrRange.second = strIter;
                 //strIter 是该匹配串的终止节点
                 result.terminalId = getTerminalId(lastDfaIndex);
             }
@@ -994,7 +947,7 @@ resultOfTokenizerMatchType tokenizerMatch(const std::vector<dfaState>& inputDfa,
         }
         if(getTerminalId(lastDfaIndex) != nonterminalFlagOfDfaState && getTerminalId(thisDfaIndex) == nonterminalFlagOfDfaState)
         {
-            result.strRange.second = strIter;
+            result.matchedStrRange.second = strIter;
             //strIter 是该匹配串的终止节点
             result.terminalId = getTerminalId(lastDfaIndex);
             return result;
@@ -1003,7 +956,7 @@ resultOfTokenizerMatchType tokenizerMatch(const std::vector<dfaState>& inputDfa,
     // 这里因为lastDfaIndex 没有更新， 所以是判断terminalId of thisDfaIndex
     if(getTerminalId(thisDfaIndex) != nonterminalFlagOfDfaState)
     {
-        result.strRange.second = strIter;
+        result.matchedStrRange.second = strIter;
         result.terminalId = getTerminalId(thisDfaIndex);
     }
     return result;
@@ -1040,10 +993,10 @@ std::vector<dfaState> getDfaByStrVec(const std::vector<std::string>& strVec)
 
 const lexerIterator& lexerIterator::operator++() // 前置++
 {
-    resultOfTokenizerMatchType result;
+    matchedContentType result;
 	result = tokenizerMatch(dfaVecReference, 
-	strRangeType(rangeOfMatchedContent.second, toMatch.end()));
-    rangeOfMatchedContent = result.strRange;
+		strRangeType(rangeOfMatchedContent.second, toMatch.end()));
+    rangeOfMatchedContent = result.matchedStrRange;
     terminalId = result.terminalId;
     return *this;
 }
@@ -1065,11 +1018,15 @@ lexer::iterator lexer::getIterator(const std::string* strPtrToMatch) const
 	{
 		throw std::exception("invalid pointer!");
 	}
-    // 使用指针是为了防止 传入临时变量最终导致 strIterator 无效
+	if(!registered)
+	{
+		throw std::exception("lexer  has not been registered!");
+	}
+    // 使用指针是为了提醒用户不要使用临时变量最终导致 strIterator 无效
     iterator result = lexerIterator(*strPtrToMatch, dfaVec);
     ++result;
     return result;
-    }
+}
 
 	
 void lexer::dfaInit()
@@ -1115,7 +1072,6 @@ void lexer::endRegist()
     registered = true;
     dfaInit();
 }
-
 
 
 } // namespace ccDetail
