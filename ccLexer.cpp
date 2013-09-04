@@ -1037,6 +1037,9 @@ void lexer::dfaInit()
 	{
 		throw(std::exception(e.what()));
 	}
+	decltype(strVec) t;
+	t.swap(strVec);
+	//清空保存正则表达式的vector
 }
 
 

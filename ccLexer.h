@@ -1,3 +1,6 @@
+#ifndef CCLEXER_H_INCLUDED
+#define CCLEXER_H_INCLUDED
+
 #include <string>
 #include <vector>
 
@@ -119,3 +122,6 @@ namespace cc
 	using ccDetail::lexer;
 	using ccDetail::lexerIterator;
 }
+
+
+#endif
