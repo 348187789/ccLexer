@@ -19,6 +19,9 @@
 #include <queue>
 #include <string>
 
+#include <iostream>
+#include <sstream>
+
 #include "ccLexer.h"
 
 
@@ -210,6 +213,7 @@ void getIsRegexSpecialCharArry(const char*& ret)
     specialCharArry[static_cast<unsigned int>('}')] = 1;
     specialCharArry[static_cast<unsigned int>('\\')] = 1;
     specialCharArry[static_cast<unsigned int>('/')] = 1;
+    specialCharArry[static_cast<unsigned int>('^')] = 1; // 共14个
     ret = specialCharArry;
 }
 
@@ -324,7 +328,7 @@ struct nfaState
 
     void linkToState(nfaState* next, charRange cRange)
     {
-        regex_assert(cRange.begin() != 127,"wrong char range, cannot use char(127)\n");
+        regex_assert(cRange.end() != 127,"wrong char range, cannot use char(127)\n");
         assert(next);
         if(nextStates.empty())
         {
@@ -335,6 +339,17 @@ struct nfaState
             nextStates[static_cast<unsigned int>(c)] = next;
         }
     }
+
+	void unlinkToState(nfaState* next, charRange cRange)
+	{
+		regex_assert(cRange.end() != 127, "wrong char rang, cannot use char(127)\n");
+		assert(next);
+		assert(!nextStates.empty());
+		for(char c = cRange.begin(); c <= cRange.end(); ++c)
+		{
+            nextStates[static_cast<unsigned int>(c)] = nullptr;
+		}
+	}
 };
 
 
@@ -442,18 +457,33 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
     auto readCharRange = [&]
     () -> charRange 
     {
-        if(isSpecialChar(*strIter))
+		// 如果charRange里要读'-'一般正则式是怎么显示的呢，这里暂时先用 /- 或\\-,
+		// 查到相关资料后再做相应更改
+		char first = '\0';
+		regex_assert(strIter != strEnd, "invalid char range!");
+		if(*strIter == '\\' || *strIter == '/')
 		{
-            return charRange('\0'); // 返回时会被检测 *strIter == ']'
+			++strIter;
+			regex_assert(strIter != strEnd, "invalid char range!");
+			regex_assert(isSpecialChar(*strIter) || *strIter == '-' , "Illegal escape character!");
 		}
-        char first = *strIter++;
-        regex_assert(*strIter == '-', "valid char range");
-        ++strIter;
-        regex_assert(*strIter != char(0)  , "valid char range");
-        char end = *strIter;
-        ++strIter;
-        // 返回时 strIter
-        return charRange(first, end);
+		first = *strIter;
+		++strIter;
+		regex_assert(strIter != strEnd, "invalid char range!");
+
+		if(*strIter == '-')
+		{
+			++strIter;
+	        regex_assert(strIter != strEnd  , "invalid char range!");
+		    char end = *strIter;
+			++strIter;
+			// 返回时 strIter
+			return charRange(first, end);
+		}
+		else
+		{
+			return charRange(first, first);
+		}
 
     }; // regex::readCharRange()
 
@@ -513,7 +543,8 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
             else if(equal(*strIter, '.'))
             {
                 storePre();
-                thisNfa = constructByCharRange( charRange(char(1), char(126)) ); 
+                thisNfa = constructByCharRange( charRange(char(0), char('\n' - 1)) );
+				thisNfa.pBegin->linkToState(thisNfa.pEnd, charRange(char('\n' + 1), char(126)));
                                             // 127是char的最大值，会导致range求值无限循环
             }
             else if(equal(*strIter, '*'))
@@ -551,15 +582,32 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
                 ++strIter; // 每一个readXX()程序都直接从*strIter读起
                            // 调用者在函数返回后也是直接判断*strIter是不是指定终结符
                            // readXX()中还要持续检查'\0'
-                charRange cRange = readCharRange();
-                thisNfa.pBegin->linkToState(thisNfa.pEnd, cRange);
-                while(!isSpecialChar(*strIter))
-                {
-                    cRange = readCharRange();
-                    thisNfa.pBegin->linkToState(thisNfa.pEnd, cRange);
-                }
-                regex_assert(strIter!= strEnd && equal(*strIter, ']'), "unmatched '['\n");
-            }
+				if(strIter == strEnd)
+				{
+					throw std::exception("Illegal escape character!");
+				}
+				if(!equal(*strIter, '^'))
+				{
+					charRange cRange = readCharRange();
+					thisNfa.pBegin->linkToState(thisNfa.pEnd, cRange);
+					while(*strIter != ']')
+					{
+						cRange = readCharRange();
+						thisNfa.pBegin->linkToState(thisNfa.pEnd, cRange);
+					}
+				   regex_assert(strIter!= strEnd && equal(*strIter, ']'), "unmatched '['\n");
+				}
+				else
+				{
+					thisNfa.pBegin->linkToState(thisNfa.pEnd, charRange(char(0), char(126)));
+					charRange cRange = readCharRange();
+					while(*strIter != ']')
+					{
+						cRange = readCharRange();
+						thisNfa.pBegin->unlinkToState(thisNfa.pEnd, cRange);
+					}
+				}
+			}
             else if(equal(*strIter, ']'))
             {
                 break;
@@ -593,6 +641,10 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
                 char special = *strIter;
                 thisNfa = constructByCharRange(charRange(special));
             }
+			else if(equal(*strIter, '^'))
+			{
+				throw std::exception("Keyword not supported: \'^\'");
+			}
         }
         storePre();
         if(!preNfa)
@@ -895,87 +947,7 @@ std::vector<dfaState> getDfa(const nfa inputNfa)
     return getDfa(inputNfaVec);
 }
 
-
-
-typedef std::pair<std::string::const_iterator, std::string::const_iterator> constStrRangeType;
-
-struct matchedContentType
-{
-	constStrRangeType matchedStrRange;
-	int terminalId;
-};
-
-matchedContentType tokenizerMatch(const std::vector<dfaState>& inputDfa, constStrRangeType src)
-{
-    matchedContentType result;
-    result.matchedStrRange.first  = src.first; // stringRange.first = src.first
-    result.matchedStrRange.second = src.first; // stringRange.second = src.first
-    result.terminalId  = nonterminalFlagOfDfaState;
-    if(src.first >= src.second)
-    {
-        return result;
-    }
-
-    auto getTerminalId = [&]
-    (int inputIndex) -> int
-    {
-        assert(inputIndex != nextDfaIsNullFlag);
-        return inputDfa[inputIndex].terminalId;
-    };
-    
-    auto strIter  = src.first;
-    auto strBegin = src.first;
-    auto strEnd   = src.second;
-    int lastDfaIndex = 0;
-    int thisDfaIndex  = 0;
-
-    // 注意index == nextDfaIsNullFlag 和 indexTerminal == nonterminalFlagOfDfaState 意义的不同
-    for(; strIter != strEnd; ++strIter)
-    {
-        assert((thisDfaIndex >= 0) && (unsigned int)thisDfaIndex < inputDfa.size());
-        lastDfaIndex = thisDfaIndex;
-        thisDfaIndex = inputDfa[thisDfaIndex].next[static_cast<unsigned int>(*strIter)];
-        if(thisDfaIndex == nextDfaIsNullFlag)
-        {
-            if(getTerminalId(lastDfaIndex) != nonterminalFlagOfDfaState)
-            {
-                result.matchedStrRange.second = strIter;
-                //strIter 是该匹配串的终止节点
-                result.terminalId = getTerminalId(lastDfaIndex);
-            }
-            return result;
-        }
-        if(getTerminalId(lastDfaIndex) != nonterminalFlagOfDfaState && getTerminalId(thisDfaIndex) == nonterminalFlagOfDfaState)
-        {
-            result.matchedStrRange.second = strIter;
-            //strIter 是该匹配串的终止节点
-            result.terminalId = getTerminalId(lastDfaIndex);
-            return result;
-        }
-    }
-    // 这里因为lastDfaIndex 没有更新， 所以是判断terminalId of thisDfaIndex
-    if(getTerminalId(thisDfaIndex) != nonterminalFlagOfDfaState)
-    {
-        result.matchedStrRange.second = strIter;
-        result.terminalId = getTerminalId(thisDfaIndex);
-    }
-    return result;
-}
-
-} // namespace ccDetail
-
-
-/******************************************************************/
-/*                      api                                       */
-/******************************************************************/
-
-// muitiMatch 优先级 ： 先长度优先， 再按优先级优先
-//  ifa -> tag : id
-//  if  -> tag : if
-namespace ccDetail
-{
-
-std::vector<dfaState> getDfaByStrVec(const std::vector<std::string>& strVec)
+std::vector<dfaState> getDfa(const std::vector<std::string>& strVec)
 {
     cc::pool<cc::pool<nfaState>> poolPool;
     std::vector<nfa> nfaVec;
@@ -990,91 +962,134 @@ std::vector<dfaState> getDfaByStrVec(const std::vector<std::string>& strVec)
     return getDfa(nfaVec);
 }
 
-
-const lexerIterator& lexerIterator::operator++() // 前置++
+std::vector<dfaState> getDfa(const std::string& inputStr)
 {
-    matchedContentType result;
-	result = tokenizerMatch(dfaVecReference, 
-		strRangeType(rangeOfMatchedContent.second, toMatch.end()));
-    rangeOfMatchedContent = result.matchedStrRange;
-    terminalId = result.terminalId;
-    return *this;
-}
-
-std::pair<std::string, int> lexerIterator::operator*()
-{
-	return std::make_pair(std::string(rangeOfMatchedContent.first, rangeOfMatchedContent.second), int(terminalId));
+	std::vector<std::string> strVec;
+	strVec.push_back(inputStr);
+	return getDfa(strVec);
 }
 
 
+std::pair<std::string, int> dfaMatch(
+    const std::vector<dfaState>& inputDfa, std::basic_istream<char>& stream)//std::basic_streambuf<char>& buf)
+{
+    auto& buf = *(stream.rdbuf());
+    typedef std::pair<std::string, int> result_type;
+    std::string resultString; 
+    char thisChar = '\0';
+
+    int lastDfaIndex = nextDfaIsNullFlag;
+    int thisDfaIndex = 0;
+
+    auto getTerminalId = [&]
+    (int inputIndex) -> int
+    {
+        assert(inputIndex != nextDfaIsNullFlag);
+        return inputDfa[inputIndex].terminalId;
+    };
+
+    while(1)
+    {
+        thisChar = buf.sbumpc();
+        if(thisChar == std::char_traits<char>::eof())
+        {
+            break;
+        }
+        resultString.push_back(thisChar);
+        lastDfaIndex = thisDfaIndex;
+        thisDfaIndex = inputDfa[thisDfaIndex].next[static_cast<unsigned int>(thisChar)];
+        if(thisDfaIndex == nextDfaIsNullFlag)
+        {
+            if(getTerminalId(lastDfaIndex) != nonterminalFlagOfDfaState)
+            {
+                // match("abx", regex("ab")) thisChar == 'x'
+                resultString.pop_back();
+                buf.sungetc();
+                return result_type(std::move(resultString), std::move(inputDfa[lastDfaIndex].terminalId));
+            }
+            // 意外终止，  match("abx", regex("abc")); 恢复流中数据
+			while(!resultString.empty())
+			{
+			    resultString.pop_back();
+			    buf.sungetc();
+			}
+            return result_type(std::string(), int(nonterminalFlagOfDfaState));
+        }
+    }
+    // 因到达EOF停止， lastDfaIndex没有更新， 所以是判断thisDfaIndex
+    if(getTerminalId(thisDfaIndex) != nonterminalFlagOfDfaState)
+    {
+        // TODO 提供判断iter正常判断到了文件尾或是str尾的方法
+		// break发生在查表前，这里判断的是thisDfaIndex
+
+        return result_type(std::move(resultString), std::move(inputDfa[thisDfaIndex].terminalId));      
+    }
+	while(!resultString.empty())
+	{
+        resultString.pop_back();
+        buf.sungetc();
+	}
+    return result_type(std::move(resultString), std::move(nonterminalFlagOfDfaState));
+};
+
+bool regex_match(const std::string& toMatch, std::string re)
+{
+    auto dfa = getDfa(re);
+    std::istringstream s(toMatch);
+	auto result = dfaMatch(dfa, s);
+    return result.first.size() == toMatch.size();
+}
+
+const std::pair<std::string, int>& lexIterator::operator*()
+{
+	assert(pFromStream);
+    if(!pFromStream)
+    {
+        throw std::exception("invalid iterator!");
+    }
+    return data;
+}
+
+lexIterator& lexIterator::operator++() // 只支持前置形式
+{
+    assert(pFromStream);
+    if(!pFromStream)
+    {
+        throw std::exception("invalid iterator!");
+    }
+    data = dfaMatch(*dfa, *pFromStream);
+	return *this;
+}
+
+bool lexIterator::operator==(const lexIterator& other)
+{
+    // 主要用于比较end，在其他情况下使用基本是未定义的
+    return  data.second == other.data.second &&  
+            data.first  == other.data.first;
+           
+}
+
+
+bool lexIterator::operator!=(const lexIterator& other)
+{
+    // 主要用于比较end，在其他情况下使用基本是未定义的
+    return  data.second != other.data.second ||  
+            data.first  != other.data.first;
+}
+
+
+void lexer::compile()
+{
 	
-lexer::iterator lexer::getIterator(const std::string* strPtrToMatch) const
-{
-
-	assert(strPtrToMatch);
-	if(!strPtrToMatch)
-	{
-		throw std::exception("invalid pointer!");
-	}
-	if(!registered)
-	{
-		throw std::exception("lexer  has not been registered!");
-	}
-    // 使用指针是为了提醒用户不要使用临时变量最终导致 strIterator 无效
-    iterator result = lexerIterator(*strPtrToMatch, dfaVec);
-    ++result;
-    return result;
+    assure(!compiled, "lexer has already been compiled!");
+    dfa.reset( new std::vector<dfaState>(getDfa(regexes)) ); // shared_ptr dfa
+    decltype(regexes) t;
+    regexes.swap(t);
+    compiled = true;
 }
 
-	
-void lexer::dfaInit()
-{
-	try
-	{
-		dfaVec = getDfaByStrVec(strVec);
-	}
-	catch(const regex_exception& e)
-	{
-		throw(std::exception(e.what()));
-	}
-	decltype(strVec) t;
-	t.swap(strVec);
-	//清空保存正则表达式的vector
-}
-
-
-
-int lexer::regist(std::string&& inputRegexStr)
-{
-    if(registered)
-    {
-        throw std::exception("lexServer has already been registered!");
-    }
-    strVec.push_back(inputRegexStr);
-    return nextId++;
-}
-
-int lexer::regist(const std::string& inputRegexStr)
-{
-    if(registered)
-    {
-        throw std::exception("lexServer has already been registered!");
-    }
-    strVec.push_back(inputRegexStr);
-    return nextId++;
-}
-
-void lexer::endRegist()
-{
-    if(registered)
-    {
-        throw std::exception("lexServer has already been registered!");
-    }
-    registered = true;
-    dfaInit();
-}
-
-
+// match("abc", regex("ab", "abc", "c")) -> token : ab, c
+// match("", regex())
+// match("", regex())
+// match("", regex())
 } // namespace ccDetail
-
-

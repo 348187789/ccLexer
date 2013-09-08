@@ -36,92 +36,103 @@ struct dfaState
     }
 };
 
-// std::vector<dfaState> 就是最终的dfa，vec[0] 是初始节点
 
 
-class lexer;
+bool regex_match(const std::string& toMatch, std::string re);
 
-class lexerIterator
+
+class lexIterator
 {
 public:
-
-    typedef std::string::const_iterator strIterType;
-    typedef std::pair<strIterType, strIterType> strRangeType;
-
-private:
-    friend class lexer;
-    lexerIterator(const std::string& inputStr, const std::vector<dfaState>& inputDfaVecReference)
-        : dfaVecReference(inputDfaVecReference)
-        , rangeOfMatchedContent(inputStr.begin(), inputStr.begin())
-        , terminalId(-1)
-        , toMatch(inputStr)
+    lexIterator()
     {
+        data.second = nonterminalFlagOfDfaState;
     }
 
-public:
-    // 复制构造和赋值构造用默认的就可以
-    const lexerIterator& operator++();
-    std::pair<std::string, int> operator*();
+    const std::pair<std::string, int>& operator*();
 
-    strRangeType getRange()
+    lexIterator& operator++(); // 只支持前置形式
+
+    bool operator==(const lexIterator& other);
+
+    bool operator!=(const lexIterator& other);
+
+    operator bool()
     {
-        return rangeOfMatchedContent;
+        return data.second != nonterminalFlagOfDfaState;
     }
 
-	int getTagId()
-	{
-		return terminalId;
-	}
-
-    operator bool() const
+    lexIterator(std::shared_ptr<std::vector<dfaState> > inputDfa,
+        std::istream& inputStream)
+        : pFromStream(&inputStream)
+        , dfa(inputDfa)
     {
-        return rangeOfMatchedContent.first != rangeOfMatchedContent.second;
+        operator++();
     }
 
 private:
-    const std::vector<dfaState>& dfaVecReference;
-    strRangeType rangeOfMatchedContent;
-    int terminalId;
-    const std::string& toMatch;
+    std::istream* pFromStream;
+    std::shared_ptr<std::vector<dfaState> > dfa;
+    std::pair<std::string, int> data;
 };
+
 
 class lexer
 {
 public:
-	lexer() : registered(false), nextId(0) {}
+	lexer() : lastId(-1), compiled(false){}
 
-    typedef lexerIterator iterator;
+    int regist(const std::string& re)
+    {
+        assure(!compiled, "lexer has already been compiled!");
+        regexes.push_back(re);
+		return ++lastId;
+    }
 
-	int regist(std::string&& inputRegexStr);
+    int regist(std::string&& re)
+    {
+        assure(!compiled, "lexer has already been compiled!");
+        regexes.push_back(std::move(re));
+		return ++lastId;
+    }
 
-	int regist(const std::string& inputRegexStr); 
+    void compile();
 
-	void endRegist();
-
-    iterator getIterator(const std::string* strPtrToMatch) const; 
-	// todo : 增加从文本文件中获得iterator的重载版本
+    lexIterator getIterator(std::basic_istream<char>& inputIstream)
+    {
+        if(!compiled)
+        {
+            compile();
+        }
+        return lexIterator(dfa, inputIstream);
+    }
 
 private:
-
-    void dfaInit();
-
-	bool registered;
-	int nextId;
-    std::vector<std::string> strVec;
-    std::vector<dfaState>    dfaVec;
-
-	lexer(const lexer&);
-	void operator=(const lexer&);
+    void assure(bool expr, const char* message)
+    {
+        if(!expr)
+        {
+            throw std::exception(message);
+        }
+    }
+	int lastId;
+    bool compiled;
+    std::vector<std::string> regexes;
+    std::shared_ptr<std::vector<dfaState> > dfa;
 };
+
+
+// std::vector<dfaState> 就是最终的dfa，vec[0] 是初始节点
 
 } // namespace ccDetail
 
-
 namespace cc
 {
+	using ccDetail::regex_match;
+	using ccDetail::lexIterator;
 	using ccDetail::lexer;
-	using ccDetail::lexerIterator;
 }
+
 
 
 #endif
