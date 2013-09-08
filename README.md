@@ -6,52 +6,66 @@ A lexer written in C++.
 How to use
 ---------------------------
 
-		#include <iostream>
-		#include "ccLexer.h"
+		
+		BOOST_AUTO_TEST_SUITE(s_example)
 
-		int main()
+
+		BOOST_AUTO_TEST_CASE(t_example_regex_match)
 		{
-			cc::lexer myLexer;
-
-			const int tag_blank = myLexer.regist(" ");
-			const int tag_set   = myLexer.regist("=");
-			const int tag_id    = myLexer.regist("([a-z]|_)([a-z0-9]|_)*");
-			const int tag_num   = myLexer.regist("(/+|-)?(0|[1-9][0-9]*)(.[0-9]*)?");
-			
-			myLexer.endRegist();
-
-			assert(tag_blank == 0);
-			assert(tag_set   == 1);
-			assert(tag_id    == 2);
-			assert(tag_num   == 3);
-
-			std::string toMatch("float var1=1.8");
-
-			auto iter = myLexer.getIterator(&toMatch);
-
-			auto printContent = []
-			(decltype(iter)& inputIter)
-			{
-				std::cout<<'('
-						<<std::setw(5)<<(*inputIter).first
-						<<", "
-						<<std::setw(5)<<(*inputIter).second
-						<<')'<<std::endl;
-			};
-			while(iter)
-			{
-				printContent(iter);
-				++iter;
-			} 
-					  
+			using cc::regex_match;
+			BOOST_CHECK_EQUAL(true,  regex_match("abb", "ab*"));
+			BOOST_CHECK_EQUAL(true,  regex_match("int32_t", "[a-z_][a-z0-9_]*"));
+			BOOST_CHECK_EQUAL(true,  regex_match("// this is a note", "////[^\n]*"));
 		}
 
+		BOOST_AUTO_TEST_CASE(t_example_lex)
+		{
+			using cc::lexer;
+			using cc::lexIterator;
+			lexer lex;
+			const int tag_blank = lex.regist(" ");
+			const int tag_nextline = lex.regist("\n");
+			const int tag_id = lex.regist("[a-z_][a-z0-9_]*");
+			const int tag_note1 = lex.regist("////[^\n]*");
+			const int tag_note2 = lex.regist("///*[^/*]*(([^/*//](//)*)*(/*))+//");
+			lex.compile();
+
+			char* tags[] = {"tag_blank", "tag_nextline", "tag_id", "tag_note1", "tag_note2"};
+
+			std::string str("hello var1//var var1\n /*/* note /**/");
+
+			std::istringstream stream(str);
+			auto iter = lex.getIterator(stream);
+
+			auto printIterContent = [&tags]
+			(lexIterator& iter)
+			{
+				std::cout<<"("
+						 <<std::setw(12)<<tags[(*iter).second]
+						 <<"  ,  "
+						 <<"\""<<(*iter).first<<"\""
+						 <<")"
+						 <<std::endl;
+			};
+
+			while(iter)
+			{
+				printIterContent(iter);
+				++iter;
+			}
+		}
+
+		BOOST_AUTO_TEST_SUITE_END()
+
 Output
+---------------------------
 
-----------------------------
 
-		(float,     2)
-		(     ,     0)
-		( var1,     2)
-		(    =,     1)
-		(  1.8,     3)
+		(      tag_id  ,  "hello")
+		(   tag_blank  ,  " ")
+		(      tag_id  ,  "var1")
+		(   tag_note1  ,  "//var var1")
+		(tag_nextline  ,  "
+		")
+		(   tag_blank  ,  " ")
+		(   tag_note2  ,  "/*/* note /**/")
