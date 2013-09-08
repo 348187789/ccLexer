@@ -459,15 +459,23 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
     {
 		// 如果charRange里要读'-'一般正则式是怎么显示的呢，这里暂时先用 /- 或\\-,
 		// 查到相关资料后再做相应更改
-		char first = '\0';
-		regex_assert(strIter != strEnd, "invalid char range!");
-		if(*strIter == '\\' || *strIter == '/')
+		auto readCharIntern = [&strIter, strEnd] //与前面不同 这里的转义 包括 /- ， 
+		()->char
 		{
-			++strIter;
 			regex_assert(strIter != strEnd, "invalid char range!");
-			regex_assert(isSpecialChar(*strIter) || *strIter == '-' , "Illegal escape character!");
-		}
-		first = *strIter;
+			regex_assert(!isSpecialChar(*strIter) || *strIter == '/' || *strIter == '\\', 
+				"keyword in char range or illegal \']\'!");
+			if(*strIter == '\\' || *strIter == '/')
+			{
+				++strIter;
+				regex_assert(strIter != strEnd, "invalid char range!");
+				regex_assert(isSpecialChar(*strIter) || *strIter == '-' , "Illegal escape character!");
+			}
+			return *strIter;
+		};
+
+		char first = readCharIntern();
+
 		++strIter;
 		regex_assert(strIter != strEnd, "invalid char range!");
 
@@ -475,7 +483,7 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
 		{
 			++strIter;
 	        regex_assert(strIter != strEnd  , "invalid char range!");
-		    char end = *strIter;
+		    char end = readCharIntern();
 			++strIter;
 			// 返回时 strIter
 			return charRange(first, end);
@@ -599,13 +607,14 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
 				}
 				else
 				{
+					++strIter;
+					regex_assert(strIter != strEnd, "Illegal escape character!");
+
 					thisNfa.pBegin->linkToState(thisNfa.pEnd, charRange(char(0), char(126)));
-					charRange cRange = readCharRange();
-					while(*strIter != ']')
-					{
-						cRange = readCharRange();
+					do{
+						charRange cRange = readCharRange();
 						thisNfa.pBegin->unlinkToState(thisNfa.pEnd, cRange);
-					}
+					}while(*strIter != ']');
 				}
 			}
             else if(equal(*strIter, ']'))
