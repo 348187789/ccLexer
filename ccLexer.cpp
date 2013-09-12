@@ -680,7 +680,6 @@ std::tuple< nfa, cc::pool<nfaState> > getNfa(const std::string& str)
 
 
 
-
 typedef std::set<nfaState*> closure;
 // 这里使用unordered_set会assertin fail, 暂时还没查清原因
 
@@ -738,7 +737,6 @@ closure getClosure(nfaState* inputNfaState)
 // 每次查询的闭包和最后dfa使用到的闭包不是同一个集合，
 // 所有查询过的单节点对应的闭包存放如 closureChache里面
 //  closureCache type : std::unordered_map<nfaState*, closure>
-//  getClosureCache type : function<const closure&(nfaState*)>
 
 // 用于形成 dfa 的闭包存放在 sMove 中
 // sMoveType : std::map< closure, std::pair<dfaState, int> >
@@ -905,13 +903,10 @@ std::vector<dfaState> getDfa(const std::vector<nfa>& inputNfaVec)
             }
             else
             {
-		// times 6700
-
 				auto toClosureIter = sMove.find(toClosure); /////////////28% time
 				if(toClosureIter == sMove.end())
                 {
 					// 将结果写入sMove
-
                     auto insertResult = sMove.insert(sMoveType::value_type(toClosure, sMoveContentType()));//// 7% time
                     // id必须这里设置， 因为下面就要对fromDfaState.next[c]赋值了
 					toClosureIter = insertResult.first;
@@ -1028,9 +1023,8 @@ std::pair<std::string, int> dfaMatch(
     // 因到达EOF停止， lastDfaIndex没有更新， 所以是判断thisDfaIndex
     if(getTerminalId(thisDfaIndex) != nonterminalFlagOfDfaState)
     {
-        // TODO 提供判断iter正常判断到了文件尾或是str尾的方法
+        // 异常终止会把错误匹配的信息填回stream
 		// break发生在查表前，这里判断的是thisDfaIndex
-
         return result_type(std::move(resultString), std::move(inputDfa[thisDfaIndex].terminalId));      
     }
 	while(!resultString.empty())
@@ -1046,7 +1040,8 @@ bool regex_match(const std::string& toMatch, std::string re)
     auto dfa = getDfa(re);
     std::istringstream s(toMatch);
 	auto result = dfaMatch(dfa, s);
-    return result.first.size() == toMatch.size();
+    return toMatch.size() != 0 ? result.first.size() == toMatch.size()
+							   : dfa[0].terminalId != nonterminalFlagOfDfaState;
 }
 
 const std::pair<std::string, int>& lexIterator::operator*()
@@ -1078,7 +1073,6 @@ bool lexIterator::operator==(const lexIterator& other)
            
 }
 
-
 bool lexIterator::operator!=(const lexIterator& other)
 {
     // 主要用于比较end，在其他情况下使用基本是未定义的
@@ -1086,10 +1080,8 @@ bool lexIterator::operator!=(const lexIterator& other)
             data.first  != other.data.first;
 }
 
-
 void lexer::compile()
 {
-	
     assure(!compiled, "lexer has already been compiled!");
     dfa.reset( new std::vector<dfaState>(getDfa(regexes)) ); // shared_ptr dfa
     decltype(regexes) t;
@@ -1097,8 +1089,4 @@ void lexer::compile()
     compiled = true;
 }
 
-// match("abc", regex("ab", "abc", "c")) -> token : ab, c
-// match("", regex())
-// match("", regex())
-// match("", regex())
 } // namespace ccDetail
